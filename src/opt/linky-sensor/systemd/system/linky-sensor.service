@@ -1,0 +1,18 @@
+[Unit]
+Description=Linky-Sensor service
+
+[Service]
+# Note: setting PYTHONUNBUFFERED is necessary to see the output of this service in the journal
+# See https://docs.python.org/2/using/cmdline.html#envvar-PYTHONUNBUFFERED
+Environment=PYTHONUNBUFFERED=true
+
+# Adjust this line to the correct path to test.py
+ExecStart=/opt/linky-sensor/virtualenv/bin/python3 /opt/linky-sensor/bin/linky-sensor.py
+
+Type=notify
+WatchdogSec=30
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
