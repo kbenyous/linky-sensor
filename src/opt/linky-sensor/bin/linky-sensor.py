@@ -6,6 +6,10 @@ import logging
 import subprocess
 import io
 import datetime
+import configparser
+import paho.mqtt.client as mqtt
+import sdnotify
+import json
 
 # Port serial
 stty_port = '/dev/serial0'
@@ -87,35 +91,68 @@ def read_data(frame):
             if horodate is not None:
                 try:
                     timestamp = decode_horodate(horodate)
-                except ValueError :
+                except ValueError:
                     timestamp = 0
-                result[label] = {'Value': donnee, 'Timestamp': timestamp.timestamp()}
+                result[label] = {'Value': donnee,
+                                 'Timestamp': timestamp.isoformat()}
             else:
                 result[label] = {'Value': donnee}
 
     return result
 
+
 def decode_horodate(horodate):
     # Enleve le premier caractère qui ne sert pars à la compréhension de la date
     buff = horodate[1:]
     logging.info(buff)
-    result_datetime = datetime.datetime.strptime(buff,'%y%m%d%H%M%S')
+    result_datetime = datetime.datetime.strptime(buff, '%y%m%d%H%M%S')
     return result_datetime
 
+
 def main():
+
+    # Notifications pour SystemD
+    systemd_notifier = sdnotify.SystemdNotifier()
+
+    # Lecture de la conf
+    config = configparser.RawConfigParser()
+    config.read('/etc/linky-sensor/linky-sensor.cfg')
+    systemd_notifier.notify('RELOADING=1')
+    
+    # Configuration du client mqtt
+    mqtt_broker_hostname = config.get('mqtt_broker', 'hostname',fallback='localhost')
+    mqtt_broker_port = config.getint('mqtt_broker', 'port', fallback=1883)
+    mqtt_client_name = config.get('mqtt_broker', 'client_name', fallback='Linky-Sensor')
+
+    # Configuration du client mqtt
+    client = mqtt.Client(mqtt_client_name)
+    client.connect_async(mqtt_broker_hostname, mqtt_broker_port)
 
     # Reconfigure le port serial pour eviter
     # l'erreur: termios.error: (22, 'Invalid argument')
     logging.info('Reconfigure stty %s' % stty_port)
     subprocess.call(['stty', '-F',  stty_port, 'iexten'])
 
+    systemd_notifier.notify('READY=1')
+    
+    client.loop_start()
+
     poll_tty_every = 0.25
+    watchdog_every = 15
+    
     with serial.Serial(port=stty_port, baudrate=9600, parity=serial.PARITY_EVEN, stopbits=serial.STOPBITS_ONE,
                        bytesize=serial.SEVENBITS, timeout=poll_tty_every) as ser:
         logging.info('Start reading frames')
+        frame_count = 0
         for frame in read_frame(ser):
-            print("Read Data Frame: " + str(read_data(frame)))
 
+            client.publish('house/sensors/energy',json.dumps(frame))
+
+            # Notification régulière à SystemD pour la surveillance du démon
+            frame_count += 1
+            if frame_count > watchdog_every:
+                systemd_notifier.notify('WATCHDOG=1')
+                frame_count = 0
 
 if __name__ == '__main__':
     main()

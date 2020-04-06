@@ -1,0 +1,163 @@
+---
+
+- hosts: linky_sensors
+  
+  tasks:
+    # TODO : cas RPI 3
+    # https://hallard.me/enable-serial-port-on-raspberry-pi/
+     # picocom -b 1200 -d 7 -p e -f n /dev/ttyAMA0
+    - block:
+
+      - name: Désactivation de la console sur le port série serial0
+        replace:
+          path: /boot/cmdline.txt
+          regexp: 'console=serial0(\S*) '
+          replace: ''
+      - name: Désactivation de la console sur le port série ttyAMA0
+        replace:
+          path: /boot/cmdline.txt
+          regexp: 'console=ttyAMA0(\S*) '
+          replace: ''
+
+      - name: Activation du port série matériel (UART)
+        ini_file:
+          path: /boot/config.txt
+          section: all
+          option: enable_uart
+          value: '1'
+      
+      - name: Création du groupe
+        group: 
+          name: linkysensor
+
+      - name: Création de l'utilisateur
+        user: 
+          name: linkysensor
+          group: linkysensor
+          password_lock: yes
+
+      - name: Création des répertoires dans /opt/linkysensor
+        file: 
+          name: "{{ item }}"
+          state: directory
+          owner: linkysensor
+          group: linkysensor
+          mode: 0755
+        loop:
+          - /opt/linky-sensor
+          - /opt/linky-sensor/virtualenv
+          - /opt/linky-sensor/bin
+          - /opt/linky-sensor/service
+          - /opt/linky-sensor/conf
+
+      - name: Création des répertoires dans /etc
+        file:
+          name: /etc/linky-sensor
+          state: directory
+          owner: root
+          group: linkysensor
+          mode: 0755
+
+      - name: Installation de Python3
+        apt:
+          name: 
+            # Intrepréteur Python3 et virtualenv pour le script linky-sensor.py 
+            - python3
+            - python3-pip
+            - python3-venv
+            - python3-setuptools
+            # Problème avec Ansible. su vers un utilisateur non-root
+            # https://stackoverflow.com/questions/36646880/ansible-2-1-0-using-become-become-user-fails-to-set-permissions-on-temp-file/36681626
+            - acl
+            # Problème avec Ansible. Pour utiliser pip, un setuptools doit être installé dans l'interpréteur Python exécutant Ansible sur la machine remote           
+            # https://github.com/ansible/ansible/issues/61929
+            - python-setuptools
+
+      become: yes      
+
+    - name: Création d'un virtualenv
+      become_user: linkysensor
+      become: yes
+      shell:  |
+        python3 -m venv /opt/linky-sensor/virtualenv
+      args:
+        creates: /opt/linky-sensor/virtualenv/bin/activate
+    
+    - name: Installation des paquets Python
+      become_user: linkysensor
+      become: yes
+      pip:
+        name:
+          - configparser
+          - paho_mqtt
+          - pyserial
+          - sdnotify
+        executable: /opt/linky-sensor/virtualenv/bin/pip3
+    
+    - name: Copie des fichiers 
+      become_user: root
+      become: yes
+      copy:
+        src: "src/{{ item.src}}"
+        dest: "{{ item.dest }}"
+        mode: "{{ item.mode }}"
+        owner: linkysensor
+        group: linkysensor
+      with_items:
+        - src: opt/linky-sensor/bin/linky-sensor.py
+          dest: /opt/linky-sensor/bin/linky-sensor.py
+          mode: "0755"
+        - src: opt/linky-sensor/service/linky-sensor.service
+          dest: /opt/linky-sensor/service/linky-sensor.service
+          mode: "0644"
+        - src: opt/linky-sensor/conf/linky-sensor.example.conf
+          dest: /opt/linky-sensor/conf/linky-sensor.example.conf
+          mode: "0644"
+      notify:
+        - "Rechargement de la description des services SystemD"
+        - "Activation et démarrage du service"
+
+    - name: Dépot de la configuration
+      become: yes
+      copy:
+        src: /opt/linky-sensor/conf/linky-sensor.example.conf
+        dest: /etc/linky-sensor/linky-sensor.conf
+        force: no
+        remote_src: yes
+        owner: root
+        group: root
+        mode: 0644
+      notify:
+        - "Rechargement de la description des services SystemD"
+        - "Activation et démarrage du service"
+
+    - name: Ajout du service dans la configuration SystemD
+      become: yes
+      file:
+        state: link
+        src: /opt/linky-sensor/service/linky-sensor.service
+        dest: /etc/systemd/system/linky-sensor.service
+        owner: root
+        group: root
+        mode: "0777"
+      notify:
+        - "Rechargement de la description des services SystemD"
+        - "Activation et démarrage du service"
+
+  handlers:
+    - name: Rechargement de la description des services SystemD
+      systemd:
+        daemon_reload: yes
+      become: yes
+        
+    - name: Activation et démarrage du service
+      systemd:
+        name: linky-sensor
+        state: started
+        enabled: yes
+      become: yes
+      
+      
+    
+
+
