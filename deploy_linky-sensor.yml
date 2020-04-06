@@ -21,10 +21,11 @@
 
       - name: Activation du port série matériel (UART)
         ini_file:
-          path: /boot/config.txt
+          path: /boot/config.txt      
           section: all
           option: enable_uart
           value: '1'
+          no_extra_spaces: yes
       
       - name: Création du groupe
         group: 
