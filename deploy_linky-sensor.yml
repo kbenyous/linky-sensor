@@ -35,6 +35,7 @@
         user: 
           name: linkysensor
           group: linkysensor
+          groups: dialout
           password_lock: yes
 
       - name: Création des répertoires dans /opt/linkysensor
@@ -138,9 +139,6 @@
         state: link
         src: /opt/linky-sensor/service/linky-sensor.service
         dest: /etc/systemd/system/linky-sensor.service
-        owner: root
-        group: root
-        mode: "0777"
       notify:
         - "Rechargement de la description des services SystemD"
         - "Activation et démarrage du service"
@@ -154,11 +152,7 @@
     - name: Activation et démarrage du service
       systemd:
         name: linky-sensor
-        state: started
+        state: restarted
         enabled: yes
       become: yes
       
-      
-    
-
-
