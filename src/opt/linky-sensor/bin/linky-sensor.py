@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 
 
 def read_frame(ser, greedy_mode=False):
-    logging.info('read_frame()')
+    logging.debug('read_frame()')
 
     buffer = bytearray()
     frame_start = 0x02
@@ -33,8 +33,8 @@ def read_frame(ser, greedy_mode=False):
         while frame_start not in buffer:
             extend_size = max(1, min(2048, ser.in_waiting)
                               ) if greedy_mode else 2048
-            logging.info(
-                "read_frame : searching frame start, buffer extend_size: %s" % extend_size)
+            logging.debug(
+                "read_frame : searching frame start, buffer extend_size: {}".format(extend_size))
             extend_data = ser.read(extend_size)
             buffer.extend(extend_data)
         framestart_idx = buffer.find(frame_start)
@@ -44,14 +44,13 @@ def read_frame(ser, greedy_mode=False):
         while -1 == buffer.find(frame_end, framestart_idx+1):
             extend_size = max(1, min(2048, ser.in_waiting)
                               ) if greedy_mode else 2048
-            logging.info(
-                "read_frame : searching frame end, buffer extend_size: %s" % extend_size)
+            logging.debug(
+                "read_frame : searching frame end, buffer extend_size: {}".format(extend_size))
             extend_data = ser.read(extend_size)
             buffer.extend(extend_data)
         frameend_idx = buffer.find(frame_end, framestart_idx+1)
 
-        logging.info("read_frame : Frame found in buffer[%i:%i]" % (
-            framestart_idx, frameend_idx+1))
+        logging.debug("read_frame : Frame found in buffer[{}:{}]".format(framestart_idx, frameend_idx+1))
         frame = buffer[framestart_idx:frameend_idx+1]
         buffer = buffer[frameend_idx+1:]
         yield frame
@@ -104,25 +103,28 @@ def read_data(frame):
 def decode_horodate(horodate):
     # Enleve le premier caractère qui ne sert pars à la compréhension de la date
     buff = horodate[1:]
-    logging.info(buff)
     result_datetime = datetime.datetime.strptime(buff, '%y%m%d%H%M%S')
     return result_datetime
 
 
 def main():
 
+    poll_tty_every = 0.25
+    watchdog_every = 15
+
     # Notifications pour SystemD
     systemd_notifier = sdnotify.SystemdNotifier()
 
     # Lecture de la conf
+    systemd_notifier.notify('RELOADING=1')
     config = configparser.RawConfigParser()
     config.read('/etc/linky-sensor/linky-sensor.cfg')
-    systemd_notifier.notify('RELOADING=1')
     
     # Configuration du client mqtt
     mqtt_broker_hostname = config.get('mqtt_broker', 'hostname',fallback='localhost')
     mqtt_broker_port = config.getint('mqtt_broker', 'port', fallback=1883)
     mqtt_client_name = config.get('mqtt_broker', 'client_name', fallback='Linky-Sensor')
+    logging.info("Connecting to MQTT broker {}:{}...".format(mqtt_broker_hostname, mqtt_broker_port))
 
     # Configuration du client mqtt
     client = mqtt.Client(mqtt_client_name)
@@ -130,23 +132,23 @@ def main():
 
     # Reconfigure le port serial pour eviter
     # l'erreur: termios.error: (22, 'Invalid argument')
-    logging.info('Reconfigure stty %s' % stty_port)
+    logging.info('Configuring stty {}'.format(stty_port))
     subprocess.call(['stty', '-F',  stty_port, 'iexten'])
 
     systemd_notifier.notify('READY=1')
     
     client.loop_start()
-
-    poll_tty_every = 0.25
-    watchdog_every = 15
+    logging.info("Connected to broker")    
     
     with serial.Serial(port=stty_port, baudrate=9600, parity=serial.PARITY_EVEN, stopbits=serial.STOPBITS_ONE,
                        bytesize=serial.SEVENBITS, timeout=poll_tty_every) as ser:
-        logging.info('Start reading frames')
+        logging.debug('Start reading frames')
         frame_count = 0
         for frame in read_frame(ser):
-
-            client.publish('house/sensors/energy',json.dumps(frame))
+            
+            text = json.dumps(read_data(frame))
+            logging.debug(text)
+            client.publish('house/sensors/energy', text)
 
             # Notification régulière à SystemD pour la surveillance du démon
             frame_count += 1
