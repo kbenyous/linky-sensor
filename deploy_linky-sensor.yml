@@ -1,7 +1,7 @@
 ---
 
 - hosts: linky_sensors
-  
+
   tasks:
     # TODO : cas RPI 3
     # https://hallard.me/enable-serial-port-on-raspberry-pi/
@@ -13,6 +13,7 @@
           path: /boot/cmdline.txt
           regexp: 'console=serial0(\S*) '
           replace: ''
+
       - name: Désactivation de la console sur le port série ttyAMA0
         replace:
           path: /boot/cmdline.txt
@@ -21,12 +22,19 @@
 
       - name: Activation du port série matériel (UART)
         ini_file:
-          path: /boot/config.txt      
+          path: /boot/config.txt
           section: all
           option: enable_uart
           value: '1'
           no_extra_spaces: yes
-      
+
+      - name: Désactivation du Bluetooth (Raspberry Pi 3 et Pi Zero)
+        when: "('Pi 3' in (ansible_local.pi.model | d([]))) or ('Pi Zero' in (ansible_local.pi.model | d([])))"
+        lineinfile:
+          path: /boot/config.txt      
+          line: dtoverlay=pi3-disable-bt
+        notify: Disable Bluetooth
+
       - name: Création du groupe
         group: 
           name: linkysensor
@@ -154,5 +162,18 @@
         name: linky-sensor
         state: restarted
         enabled: yes
+      become: yes
+
+    - name: Désactivation du service gestionnaire du Bluetooth
+      systemd:
+        name: hciuart
+        enabled: no
+        state: stopped
+      become: yes
+      listen: Disable Bluetooth
+
+    - name: Reboot
+      reboot:
+      listen: Disable Bluetooth
       become: yes
       
