@@ -118,7 +118,7 @@ def main():
     # Lecture de la conf
     systemd_notifier.notify('RELOADING=1')
     config = configparser.RawConfigParser()
-    config.read('/etc/linky-sensor/linky-sensor.cfg')
+    config.read('/etc/linky-sensor/linky-sensor.conf')
     
     # Configuration du client mqtt
     mqtt_broker_hostname = config.get('mqtt_broker', 'hostname',fallback='localhost')
