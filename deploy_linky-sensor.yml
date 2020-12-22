@@ -126,6 +126,7 @@
       notify:
         - "Rechargement de la description des services SystemD"
         - "Activation et démarrage du service"
+        - "Avertissement"
 
     - name: Dépot de la configuration
       become: yes
@@ -176,4 +177,8 @@
       reboot:
       listen: Disable Bluetooth
       become: yes
+    
+    - name: Avertissement
+      debug:
+        msg: "L'implémentation ou la configuration du service a changé, pensez à vérifier manuellement /etc/linky-sensor/linky-sensor.conf"
       

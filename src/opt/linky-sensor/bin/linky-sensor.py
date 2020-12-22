@@ -119,15 +119,24 @@ def main():
     systemd_notifier.notify('RELOADING=1')
     config = configparser.RawConfigParser()
     config.read('/etc/linky-sensor/linky-sensor.conf')
+
+    # Identification des topic MQTT
+    data_queue = config.get('mqtt_broker', 'data_queue', fallback="house/sensors/energy")
+    status_queue = config.get('mqtt_broker', 'status_queue', fallback="house/probes/linky-sensor/status")
     
     # Configuration du client mqtt
-    mqtt_broker_hostname = config.get('mqtt_broker', 'hostname',fallback='localhost')
+    mqtt_broker_hostname = config.get('mqtt_broker', 'hostname', fallback='localhost')
     mqtt_broker_port = config.getint('mqtt_broker', 'port', fallback=1883)
-    mqtt_client_name = config.get('mqtt_broker', 'client_name', fallback='Linky-Sensor')
+    mqtt_client_name = config.get('mqtt_broker', 'client_name', fallback='linky-sensor')
     logging.info("Connecting to MQTT broker {}:{}...".format(mqtt_broker_hostname, mqtt_broker_port))
 
     # Configuration du client mqtt
     client = mqtt.Client(mqtt_client_name)
+    client_user_data = dict()
+    client_user_data["status_queue"] = status_queue
+    client.user_data_set(client_user_data)
+    client.will_set(status_queue, payload="Connection Lost", qos=2, retain=True)
+    client.on_connect = on_connect
     client.connect_async(mqtt_broker_hostname, mqtt_broker_port)
 
     # Reconfigure le port serial pour eviter
@@ -138,7 +147,6 @@ def main():
     systemd_notifier.notify('READY=1')
     
     client.loop_start()
-    logging.info("Connected to broker")    
     
     with serial.Serial(port=stty_port, baudrate=9600, parity=serial.PARITY_EVEN, stopbits=serial.STOPBITS_ONE,
                        bytesize=serial.SEVENBITS, timeout=poll_tty_every) as ser:
@@ -148,13 +156,18 @@ def main():
             
             text = json.dumps(read_data(frame))
             logging.debug(text)
-            client.publish('house/sensors/energy', text)
+            client.publish(data_queue, text)
 
             # Notification régulière à SystemD pour la surveillance du démon
             frame_count += 1
             if frame_count > watchdog_every:
                 systemd_notifier.notify('WATCHDOG=1')
                 frame_count = 0
+
+
+def on_connect(client, userdata, flags, rc):
+    logging.info("Connected to broker")
+    client.publish(userdata["status_queue"], payload="Connected", qos=2, retain=True)
 
 if __name__ == '__main__':
     main()
